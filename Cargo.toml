@@ -1,0 +1,16 @@
+[package]
+name = "socks_proxy"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1.50.0", features = ["full", "sync"] }
+dotenvy = "0.15"
+env_logger = "0.11.9"
+log = "0.4.29"
+clap = { version = "4.6.0", features = ["derive"] }
+thiserror = "2.0.18"
+
+[dev-dependencies]
+tokio-test = "0.4.5"

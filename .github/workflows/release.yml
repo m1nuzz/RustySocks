@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          # Both Apple targets build on the x64 macOS 15 image; the aarch64
+          # target is cross-compiled there (the SDK is universal). The arm64
+          # hosted pool (macos-15 / macos-latest) is heavily contended and has
+          # failed with "job was not acquired by Runner of type hosted".
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-15-intel
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.cross }}" == "true" ]]; then
+            cross build --release --locked --target ${{ matrix.target }}
+          else
+            cargo build --release --locked --target ${{ matrix.target }}
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=socks_proxy
+          ext=""
+          if [[ "${{ matrix.target }}" == *windows* ]]; then ext=".exe"; fi
+          staging="socks_proxy-${{ matrix.target }}"
+          mkdir "$staging"
+          cp "target/${{ matrix.target }}/release/${bin}${ext}" "$staging/"
+          cp README.md LICENSE "$staging/" 2>/dev/null || true
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            powershell -Command "Compress-Archive -Path '$staging' -DestinationPath '${staging}.zip' -Force"
+          else
+            tar czf "${staging}.tar.gz" "$staging"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: socks_proxy-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            socks_proxy-*.tar.gz
+            socks_proxy-*.zip
+
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          # Replace the body instead of appending: re-running the workflow for an
+          # existing tag would otherwise stack duplicate "Full Changelog" lines.
+          append_body: false

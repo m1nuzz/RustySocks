@@ -1,0 +1,10 @@
+/target
+/.opencode
+**/*.rs.bk
+*.pdb
+.env
+*.zip
+*.tar.gz
+clippy_out.txt
+int_clippy.txt
+real_clippy.txt
